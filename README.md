@@ -8,6 +8,22 @@ This workflow converts NISAR RSLC products to GMTSAR files, registers acquisitio
 
 Repository: [Xin-Wang-520/nisar-pot-timeseries](https://github.com/Xin-Wang-520/nisar-pot-timeseries).
 
+## Example results: Nepal
+
+Results from the Nepal glacier study area, covering 28 November 2025 to 19 August 2026. Surface height represents DEM elevation; colours represent the radar range component.
+
+### Range velocity and point time series (Run 11)
+
+Range velocity draped on 3D terrain, with cumulative range displacement time series for P1, P2 and P3 below. Point values are means over 5×5 geographic grid nodes; displacement is relative to 28 November 2025.
+
+![Nepal glacier: range velocity on 3D terrain and point time series](docs/images/range_terrain3d_timeseries.png)
+
+### Cumulative range displacement by date (Run 12)
+
+Twenty acquisition dates shown on 3D terrain, with the first date set to 0 m and a shared displacement colour scale in metres.
+
+![Nepal glacier: cumulative range displacement on 3D terrain for all dates](docs/images/disp_all_dates_terrain3d.png)
+
 ## Processing order
 
 ```mermaid

@@ -6,7 +6,23 @@
 
 这套脚本将 NISAR RSLC 转为 GMTSAR 文件，把所有日期配准到统一主影像雷达网格，计算相邻日期的像素偏移，再生成距离向（range）和方位向（azimuth）累计偏移时间序列，并提供点位曲线与二维、三维绘图。
 
-建议仓库名称：`nisar-pot-timeseries`。
+仓库：[Xin-Wang-520/nisar-pot-timeseries](https://github.com/Xin-Wang-520/nisar-pot-timeseries)。
+
+## 结果示例：尼泊尔
+
+以下为尼泊尔冰川研究区的处理结果，时间范围为 2025 年 11 月 28 日至 2026 年 8 月 19 日。曲面高度表示 DEM 高程，颜色表示雷达距离向（range）分量。
+
+### Range 速度与点位时间序列（Run 11）
+
+上图为三维地形上的 range 速度，下图为 P1、P2、P3 的累计 range 位移时间序列。点位数值采用周围 5×5 个地理网格节点的均值，位移以 2025 年 11 月 28 日为零点。
+
+![尼泊尔冰川：三维地形上的 range 速度和点位时间序列](docs/images/range_terrain3d_timeseries.png)
+
+### 各日期累计 range 位移（Run 12）
+
+展示 20 个观测日期的三维累计位移，首期设为 0 m，所有子图使用统一的米制位移色标。
+
+![尼泊尔冰川：各日期三维累计 range 位移](docs/images/disp_all_dates_terrain3d.png)
 
 ## 运行顺序
 
