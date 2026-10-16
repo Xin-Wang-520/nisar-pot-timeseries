@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .DS_Store
+._*
 # Large inputs and generated products
 data/
 raw/

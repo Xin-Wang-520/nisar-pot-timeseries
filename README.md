@@ -8,6 +8,21 @@ This workflow converts NISAR RSLC products to GMTSAR files, registers acquisitio
 
 Repository: [Xin-Wang-520/nisar-pot-timeseries](https://github.com/Xin-Wang-520/nisar-pot-timeseries).
 
+## Start with sparse window tests, then use dense sampling
+
+Before processing the full time series, choose a representative date pair and compare `--xsearch` / `--ysearch` settings of **16, 32, 64 and 128**, using the same value in both directions initially. Start with relatively few correlation locations:
+
+| Test grid | Requested locations (`nx × ny`) |
+|---|---:|
+| `--nx 50 --ny 60` | 3,000 |
+| `--nx 150 --ny 200` | 30,000 |
+
+Compare coverage, SNR, outliers, striping and retention of glacier features in both range and azimuth products. Select a suitable search setting before increasing the sampling density; the largest setting is not necessarily the best.
+
+For the final run, increase **`nx` and `ny` until the `xcorr_mt` log reports `x_inc=1` and `y_inc=1`**. This samples at one radar pixel in each direction within the valid correlation area and may require hundreds of thousands or millions of locations, depending on the ROI. **Do not set `nx=1` and `ny=1`: these parameters specify the numbers of sampling locations, not their spacing.** For the original 1300×1024-pixel local ROI with search settings of 64, `--nx 913 --ny 639` produced 583,407 locations with `x_inc=1, y_inc=1`; this is an example, not a universal grid size. Check the actual log for each ROI and search setting, and regenerate the run tag whenever the parameters change.
+
+This is full-density sampling of the valid radar area. The correlation window still controls the effective spatial resolution, adjacent estimates overlap, and window margins prevent coverage of the entire input image. Allow substantially more time and storage for the dense run.
+
 ## Example results: Nepal
 
 Results from the Nepal glacier study area, covering 28 November 2025 to 19 August 2026. Surface height represents DEM elevation; colours represent the radar range component.
