@@ -1,0 +1,18 @@
+# Python and system files
+__pycache__/
+*.py[cod]
+.DS_Store
+# Large inputs and generated products
+data/
+raw/
+SLC*/
+topo/
+local_pot_roi/
+pot_pairs*/
+pot_timeseries/
+*.h5
+*.SLC
+*.grd
+*.PRM
+*.LED
+*.log
