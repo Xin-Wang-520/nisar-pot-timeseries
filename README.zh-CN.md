@@ -43,7 +43,9 @@
 
 ```mermaid
 flowchart TD
-    A[Run 1：准备 DEM] --> B[Run 2：RSLC 预处理和相邻日期对]
+    A0[Run 0：检查影像栈元数据] --> A[Run 1：准备 DEM]
+    A --> A15[可选 Run 1.5：保留 DHDH 产品]
+    A15 --> B[Run 2：RSLC 预处理和相邻日期对]
     B --> C[Run 3：补齐 PRM 轨道字段]
     C --> D[Run 3.5：估算范围并裁剪研究区]
     D --> E[Run 4：主影像雷达几何和 trans.dat]
@@ -59,11 +61,16 @@ flowchart TD
     L --> N[Run 11：速度叠加到三维地形]
     M --> N
     L --> O[Run 12：逐日期累计位移三维图]
+    F --> P[Run 13：事件前后振幅变化]
+    G --> P
+    P --> Q[整理尼泊尔成果并绘制振幅对比图]
 ```
 
 | 步骤 | 脚本 | 主要结果 |
 |---|---|---|
+| 0 | `run0_nisar_check_stack.py` | 只读检查采样、频率和带宽 |
 | 1 | `run1_nisar_make_dem.py` | `topo/dem.grd` |
+| 1.5，可选 | `run1.5_nisar_select_dhdh.py` | 保留 DHDH，其他配置及配套文件移入归档 |
 | 2 | `run2_nisar_preprocess.sh` | `raw/`、`inputs.tsv`、`adjacent_pairs.tsv` |
 | 3 | `run3_nisar_update_orbit_prm.sh` | raw PRM 中的轨道几何字段 |
 | 3.5 | `run3.5_nisar_slc_crop.sh` | 模式 1 估算范围；模式 2 裁剪生成 `SLC/` |
@@ -79,6 +86,9 @@ flowchart TD
 | 10 | `run10_nisar_point_timeseries.py` | 点位曲线、TSV 数值表和选点位置图 |
 | 11 | `run11_nisar_terrain3d.py` | range、az 分别叠加到 DEM 的三维速度图 |
 | 12 | `run12_nisar_terrain3d_dates.py` | 逐日期三维累计位移图及全部日期总览 |
+| 13 | `run13_nisar_amplitude_change.py` | 已配准 SLC 的振幅、功率变化网格、地图和 KMZ |
+| 成果整理 | `collect_nepal_sar_results.py` | 尼泊尔成果包，含来源路径和 SHA256 清单 |
+| 振幅对比 | `plot_nepal_amplitude_4x3.py` | 四组数据的四行三列区域对比图 |
 
 Run 4.5 模式 2 是额外的全时序共同窗口裁剪，Run 5 可直接使用模式 1 的配准结果。**先用 Run 6 测试和检查，再用 Run 6.5 正式处理**。Run 6.5 已包括 Run 6 的产品生成步骤，并增加按米阈值筛选；它直接读取 Run 5 的测点，不依赖 Run 6 的输出。
 
@@ -92,11 +102,26 @@ range 换算成米时**没有乘以 −1：正值表示远离卫星方向，负�
 - GMT，以及支持 NISAR 的 GMTSAR 环境，包括 `make_slc_nsr`、`calc_dop_orb`、`cut_slc`、`dem2topo_ra.csh`、`SAT_baseline`、`fitoffset_ra.csh`、`resamp`。
 - 可用的并行 `xcorr_mt` 程序。这些流程脚本调用该程序，不包含其实现源码。
 - Python 绘图需要 NumPy、Matplotlib；GMTSAR 脚本调用的其他程序也应在 `PATH` 中。
+- Run 0 另需 `h5py`。Run 13 还调用 GMTSAR 的 `conv`、`make_gaussian_filter`、`gmtsar_sharedir.csh`、地理投影工具及 Ghostscript。
 - 将 NISAR 主 RSLC `.h5` 文件放在 `data/` 中，保持轨道、frame、极化、频率几何一致。Run 2 按日期选择一个版本并生成相邻对。目前转换命令使用 `AHH` 通道参数，处理其他通道前需相应调整。
 
 下方例子假设脚本直接放在处理项目目录中，与 `data/` 同级。Run 11 和 Run 12 应放在同一目录，Run 12 会导入 Run 11 的网格读取和刻度函数。执行命令前先激活 GMTSAR 环境。
 
 多数脚本省略模式时预览，加 `1` 才正式处理；模式含义以各脚本为准。特别是 **Run 3.5 模式 2 才执行 SLC 裁剪**，而 Run 5/6/6.5/7/9 模式 2 是对已有产品重画。修改参数前可用各脚本的 `--help` 查看用法。
+
+## 影像栈检查与可选 DHDH 筛选
+
+Run 0 仅读取元数据，不生成 SLC。应按当前影像栈显式指定起始日期：
+
+```bash
+python3 run0_nisar_check_stack.py --data "$PWD/data" --start-date 20200101
+
+# 可选：先预览配置选择，再移动其他配置
+python3 run1.5_nisar_select_dhdh.py --data "$PWD/data"
+python3 run1.5_nisar_select_dhdh.py 1 --data "$PWD/data"
+```
+
+Run 1.5 仅扫描 `data/` 顶层，保留 DHDH，将其他配置及其配套文件移到默认的 `data/not_DHDH/`，保留已有归档并记录移动日志。选择极化配置不等于统一频谱或验证采样兼容性，应继续保留 Run 0 和原 Run 2 的检查。详见 [Run 1.5 说明](run1.5_README.md)。尼泊尔示例中，T48D 的事件前时序截至 **20260816**，T98A 截至 **20260819**；事件日期为 20260826。
 
 ## 冰川示例
 
@@ -218,7 +243,7 @@ Run 10 取的是地理网格节点，并非相互独立的原始互相关测点�
 series="$local_project/pot_timeseries/${tag}_${components}_${filter}_through_20260819"
 
 # Run 11：range、az 分别绘制线性速度三维图；
-# 同时用 Run 10 数值表绘制 range 三维地形 + 点位曲线组合图
+# 同时用 Run 10 数值表分别绘制 range、azimuth 三维速度 + 同方向点位曲线组合图
 ./run11_nisar_terrain3d.py 1 \
   --source "$local_project" --dem "$PWD/topo/dem_roi.grd" \
   --run5-tag "$tag" --components-tag "$components" --filter-tag "$filter" \
@@ -236,7 +261,35 @@ series="$local_project/pot_timeseries/${tag}_${components}_${filter}_through_202
   --dem-style earth --spacing-m 20 --columns 4
 ```
 
-点位表路径应与 Run 10 终端打印的文件夹一致，坐标或采样设置变化时路径也会变化。Run 11 仅画速度地形图时可省略 `--point-timeseries`。DEM 底色是高程渐变叠加阴影，并非光学影像；`20 m` 绘图网格只控制显示密度，不提高测量分辨率。
+点位表路径应与 Run 10 终端打印的文件夹一致，坐标或采样设置变化时路径也会变化。Run 11 仅画速度地形图时可省略 `--point-timeseries`。默认 `--component both` 会生成 `range_terrain3d_timeseries.png/.pdf` 和 `azimuth_terrain3d_timeseries.png/.pdf`，各自上方为该方向的三维速度图、下方为同方向的累计位移曲线；也可用 `--component range` 或 `--component azimuth` 只画一个方向。DEM 底色是高程渐变叠加阴影，并非光学影像；`20 m` 绘图网格只控制显示密度，不提高测量分辨率。
+
+## 振幅变化与尼泊尔成果包
+
+Run 13 从 Run 4.5/4.75 已配准的 SLC 开始，可独立于 POT 和时序计算运行。以下 T98A 例子生成地理网格、PNG/PDF 和 Google Earth KMZ：
+
+```bash
+python3 run13_nisar_amplitude_change.py 1 \
+  --source "$local_project" --pair 20260819 20260831 \
+  --smooth-m 60 --spacing-m 15 \
+  --output "$PWD/amplitude_results/20260819_20260831/cut_geocoded"
+```
+
+T48D 当前保留的 DHDH 跨事件日期对为 **20260816–20260909**。Run 13 保留初始滤波版本和额外的 `gaussian_60m` 版本。振幅为滤波功率的平方根，dB 变化为 `10 log10(P_post/P_pre)`。结果属于相对值，未做 sigma0/gamma0 定标或地形辐射归一化；15 m 地理采样与 60 m 滤波参数含义不同。详见 [Run 13 说明](run13_README.md)。
+
+成果整理脚本按本次尼泊尔服务器目录配置：`NISAR/T98A`、`NISAR/T48D`、`lutan/ASC` 和 `lutan/DESC`，日期对及参数 tag 也对应本例。用于其他项目时应调整路径和选择条件。它整理最终成果、现有脚本和 DEM；预览不复制数据，已有同名文件内容一致则跳过，数据内容冲突则停止，保留原处理目录。
+
+```bash
+base="/data2/xinw/landsides/nepal_landsides"
+bundle="$base/Nepal_20260826_SAR_Results"
+python3 collect_nepal_sar_results.py --base "$base"
+python3 collect_nepal_sar_results.py 1 --base "$base"
+
+python3 plot_nepal_amplitude_4x3.py 1 --bundle "$bundle" \
+  --region 85.512 85.536 28.278 28.299 \
+  --nisar-level initial --change-limit-db 10 --dpi 300
+```
+
+四行顺序为 **陆探降轨、NISAR T98A 升轨、陆探升轨、NISAR T48D 降轨**。三列为事件前相对功率、事件后相对功率、dB 变化。每行前后图共用功率色标，每张变化图下方各有一条色标，四行统一 ±10 dB。`--region` 只改变显示范围，原 GRD 保持不变。NISAR 默认读已有 `initial` 版本；`--nisar-level gaussian_60m` 选择已存的额外滤波版本。输出在 `02_Amplitude/Comparison_4x3/`，详见 [四行三列绘图说明](plot_nepal_amplitude_4x3_README.md)。
 
 ## 主要输出与含义
 
@@ -249,6 +302,8 @@ series="$local_project/pot_timeseries/${tag}_${components}_${filter}_through_202
 | `pot_timeseries/PRODUCT/point_timeseries/` | Run 10 曲线、数值表和位置图 |
 | `pot_timeseries/PRODUCT/terrain3d/` | Run 11 速度三维地形图 |
 | `pot_timeseries/PRODUCT/terrain3d_dates/{range,azimuth}/` | Run 12 逐日期图和总览图 |
+| `amplitude_results/PRE_POST/` | Run 13 振幅和功率变化成果 |
+| `Nepal_20260826_SAR_Results/` | 整理后的成果、脚本及来源/校验清单 |
 
 range 和 az 分别处理。Run 9 把首景固定为零后，累加相邻日期对的偏移；某节点有一期增量缺测，会传到后面的累计值。该相邻链条没有冗余时序网络约束或大气校正。线性速度图表示时段平均趋势，不表示加速度；雷达偏移分量也不是反演得到的三维冰川速度向量，三维图中的高度来自 DEM。
 

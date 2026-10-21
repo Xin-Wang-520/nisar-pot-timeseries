@@ -11,6 +11,9 @@ topo/
 local_pot_roi/
 pot_pairs*/
 pot_timeseries/
+amplitude_results/
+run8.5_pair_panels/
+Nepal_20260826_SAR_Results/
 *.h5
 *.SLC
 *.grd

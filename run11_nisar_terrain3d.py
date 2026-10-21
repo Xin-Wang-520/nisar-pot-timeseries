@@ -26,7 +26,7 @@ def arguments():
     parser.add_argument("--source", type=Path, default=Path("."), help="local POT project")
     parser.add_argument("--timeseries", type=Path, help="optional explicit Run 9 directory")
     parser.add_argument("--point-timeseries", type=Path,
-                        help="Run 10 point_timeseries.tsv or its folder; add a range terrain/time-series figure")
+                        help="Run 10 point_timeseries.tsv or its folder; add a terrain/time-series figure for each selected component")
     parser.add_argument("--dem", type=Path, help="geographic DEM in metres; default topo/dem_roi.grd")
     parser.add_argument("--run5-tag", default="xs64_ys64_nx913_ny639")
     parser.add_argument("--components-tag", default="f1_snr10_max0_m5_both")
@@ -65,8 +65,6 @@ def arguments():
         parser.error("--lonlat-step must be finite and positive")
     if args.dem_colorbar and args.dem_style != "earth":
         parser.error("--dem-colorbar requires --dem-style earth")
-    if args.point_timeseries and args.component == "azimuth":
-        parser.error("--point-timeseries requires --component range or both")
     for name in ("run5_tag", "components_tag", "filter_tag"):
         if not re.fullmatch(r"[A-Za-z0-9._-]+", getattr(args, name)):
             parser.error(f"invalid --{name.replace('_', '-')}")
@@ -171,30 +169,37 @@ def read_point_timeseries(path, args):
         path /= "point_timeseries.tsv"
     if not path.is_file():
         fail(f"Run 10 table missing: {path}")
-    required = {"point_id", "label", "requested_lon", "requested_lat", "date",
-                "range_m", "range_valid_nodes"}
+    components = ("range", "azimuth") if args.component == "both" else (args.component,)
+    required = {"point_id", "label", "requested_lon", "requested_lat", "date"}
+    for component in components:
+        required.update((f"{component}_m", f"{component}_valid_nodes"))
     groups = {}
     with path.open(encoding="utf-8", newline="") as stream:
         reader = csv.DictReader(stream, delimiter="\t")
         if not required.issubset(reader.fieldnames or []):
-            fail(f"invalid Run 10 table columns: {path}")
+            missing = sorted(required - set(reader.fieldnames or []))
+            fail(f"Run 10 table missing columns {', '.join(missing)}: {path}")
         for row in reader:
             try:
                 lon, lat = float(row["requested_lon"]), float(row["requested_lat"])
                 date = datetime.strptime(row["date"], "%Y%m%d")
-                value, count = float(row["range_m"]), int(row["range_valid_nodes"])
+                values = {key: float(row[f"{key}_m"]) for key in components}
+                counts = {key: int(row[f"{key}_valid_nodes"]) for key in components}
             except (ValueError, TypeError) as error:
                 fail(f"invalid Run 10 row: {error}")
-            if not math.isfinite(lon) or not math.isfinite(lat) or count < 0:
+            if not math.isfinite(lon) or not math.isfinite(lat) or any(count < 0 for count in counts.values()):
                 fail(f"invalid coordinates or node count in {path}")
             group = groups.setdefault(row["point_id"], {"lon": lon, "lat": lat,
                                       "label": row["label"], "dates": [],
-                                      "range": [], "nodes": []})
+                                      **{key: [] for key in components},
+                                      "nodes": {key: [] for key in components}})
             if (lon, lat, row["label"]) != (group["lon"], group["lat"], group["label"]):
                 fail(f"inconsistent coordinates/labels for point {row['point_id']}")
             group["dates"].append(date)
-            group["range"].append(value if math.isfinite(value) else math.nan)
-            group["nodes"].append(count)
+            for key in components:
+                value = values[key]
+                group[key].append(value if math.isfinite(value) else math.nan)
+                group["nodes"][key].append(counts[key])
     points = list(groups.values())
     if not points:
         fail(f"Run 10 table is empty: {path}")
@@ -228,17 +233,17 @@ def read_point_timeseries(path, args):
     return {"path": path, "points": points, "dates": dates, "sampling": sampling}
 
 
-def draw_range_timeseries(ax, point_series):
+def draw_point_timeseries(ax, point_series, component):
     import matplotlib.dates as mdates
     for point in point_series["points"]:
-        valid = sum(math.isfinite(value) for value in point["range"])
-        ax.plot(point["dates"], point["range"], marker="o", markersize=4,
+        valid = sum(math.isfinite(value) for value in point[component])
+        ax.plot(point["dates"], point[component], marker="o", markersize=4,
                 linewidth=1.6, label=f"{point['label']} ({valid}/{len(point['dates'])} dates)")
     ax.axhline(0, color="0.5", linewidth=0.7)
     ax.grid(True, color="0.87", linewidth=0.7)
-    ax.set_ylabel("Cumulative range offset (m)")
+    ax.set_ylabel(f"Cumulative {component} offset (m)")
     ax.set_xlabel("Acquisition date")
-    ax.set_title("Range time series" + point_series["sampling"] +
+    ax.set_title(f"{component.capitalize()} time series" + point_series["sampling"] +
                  f"\nrelative to {point_series['dates'][0]:%Y%m%d} = 0 m", fontsize=11)
     locator = mdates.AutoDateLocator(minticks=5, maxticks=9)
     ax.xaxis.set_major_locator(locator)
@@ -379,7 +384,7 @@ def draw(component, output, lon, lat, height, velocity, point_heights,
         temporary = destination.with_name("." + destination.name + ".tmp")
         figure.savefig(temporary, format=suffix, dpi=args.dpi, bbox_inches="tight")
         os.replace(temporary, destination)
-    if component == "range" and point_series:
+    if point_series:
         figure.set_size_inches(12, 16)
         # Axes3D uses a square panel in physical units. Give it that space
         # explicitly so it retains the same left edge, width and centre as
@@ -397,15 +402,15 @@ def draw(component, output, lon, lat, height, velocity, point_heights,
         if args.dem_colorbar:
             elevation_bar.ax.set_position((main_center - 0.21, 0.365, 0.42, 0.011))
         lower = figure.add_axes((main_left, 0.09, main_width, 0.21))
-        draw_range_timeseries(lower, point_series)
+        draw_point_timeseries(lower, point_series, component)
         note1.set_position((main_left, 0.025))
         note2.set_position((main_left, 0.010))
         for suffix in ("png", "pdf"):
-            destination = output / f"range_terrain3d_timeseries.{suffix}"
+            destination = output / f"{component}_terrain3d_timeseries.{suffix}"
             temporary = destination.with_name("." + destination.name + ".tmp")
             figure.savefig(temporary, format=suffix, dpi=args.dpi)
             os.replace(temporary, destination)
-        print(f"[COMBINED] {output / 'range_terrain3d_timeseries.png'}", flush=True)
+        print(f"[COMBINED] {output / (component + '_terrain3d_timeseries.png')}", flush=True)
     plt.close(figure)
     print(f"[PLOT {component}] {output / (component + '_velocity_terrain3d.png')}", flush=True)
 
@@ -473,7 +478,7 @@ def main():
     print(f"[OUTPUT] {output}")
     if point_series:
         print(f"[POINT SERIES] {point_series['path']}; {len(point_series['points'])} points; "
-              "additional 1-column, 2-row range figure")
+              f"additional 1-column, 2-row figures for {','.join(components)}")
     if args.mode is None:
         print("[PREVIEW] Add 1 to draw separate range/azimuth 3D terrain PNG and PDF.")
         return

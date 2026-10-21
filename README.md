@@ -43,7 +43,9 @@ Twenty acquisition dates shown on 3D terrain, with the first date set to 0 m and
 
 ```mermaid
 flowchart TD
-    A[Run 1: DEM] --> B[Run 2: RSLC preprocessing and adjacent pairs]
+    A0[Run 0: Inspect stack metadata] --> A[Run 1: DEM]
+    A --> A15[Optional Run 1.5: Select DHDH products]
+    A15 --> B[Run 2: RSLC preprocessing and adjacent pairs]
     B --> C[Run 3: Update orbit fields in PRMs]
     C --> D[Run 3.5: Estimate and crop the study region]
     D --> E[Run 4: Master radar geometry and trans.dat]
@@ -59,11 +61,16 @@ flowchart TD
     L --> N[Run 11: Velocity on 3D terrain]
     M --> N
     L --> O[Run 12: Per-date displacement on 3D terrain]
+    F --> P[Run 13: Pre/post amplitude changes]
+    G --> P
+    P --> Q[Collect Nepal results and plot amplitude comparisons]
 ```
 
 | Step | Script | Main result |
 |---|---|---|
+| 0 | `run0_nisar_check_stack.py` | Read-only sampling/frequency/bandwidth report |
 | 1 | `run1_nisar_make_dem.py` | `topo/dem.grd` |
+| 1.5, optional | `run1.5_nisar_select_dhdh.py` | Keep DHDH products and archive other configurations with sidecars |
 | 2 | `run2_nisar_preprocess.sh` | `raw/`, `inputs.tsv`, `adjacent_pairs.tsv` |
 | 3 | `run3_nisar_update_orbit_prm.sh` | Orbit geometry fields in raw PRMs |
 | 3.5 | `run3.5_nisar_slc_crop.sh` | Mode 1: ROI preview; mode 2: cropped `SLC/` |
@@ -79,6 +86,9 @@ flowchart TD
 | 10 | `run10_nisar_point_timeseries.py` | Point curves, TSV values and point-location maps |
 | 11 | `run11_nisar_terrain3d.py` | Separate range/azimuth velocity draped on DEM terrain |
 | 12 | `run12_nisar_terrain3d_dates.py` | Per-date 3D displacement maps and all-date panels |
+| 13 | `run13_nisar_amplitude_change.py` | Registered-SLC amplitude/power changes, maps and KMZ |
+| Collection | `collect_nepal_sar_results.py` | Nepal results bundle with source paths and SHA256 manifest |
+| Comparison | `plot_nepal_amplitude_4x3.py` | Four datasets in a four-row, three-column regional figure |
 
 Run 4.5 mode 2 is an optional common-window crop; Run 5 uses mode 1 products directly. Use **Run 6 first for initial testing and checking**, then **Run 6.5 for formal processing**. Run 6.5 includes the Run 6 product-generation steps and adds metre-based rejection; it reads Run 5 measurements directly, rather than consuming Run 6 products.
 
@@ -92,11 +102,26 @@ Range offsets are converted to metres using the positive PRM slant-range sample 
 - GMT and a GMTSAR installation with NISAR support, including `make_slc_nsr`, `calc_dop_orb`, `cut_slc`, `dem2topo_ra.csh`, `SAT_baseline`, `fitoffset_ra.csh` and `resamp`.
 - A working parallel `xcorr_mt` executable. The workflow scripts call this executable; its implementation is not supplied by these scripts.
 - NumPy and Matplotlib for Python figures; additional utilities used by the installed GMTSAR scripts must be available in `PATH`.
+- `h5py` for Run 0. Run 13 also uses GMTSAR `conv`, `make_gaussian_filter`, `gmtsar_sharedir.csh`, geographic projection tools and Ghostscript.
 - NISAR primary RSLC `.h5` files in `data/`, with one consistent track/frame/polarization/frequency geometry. Run 2 selects one release per date and creates the adjacent-pair list. Its converter call currently uses the `AHH` channel argument; adapt it before processing another channel.
 
 The example below assumes the scripts are directly inside the processing project directory, beside `data/`. Keep Run 11 and Run 12 together because Run 12 imports grid-reading and tick helpers from Run 11. Activate the GMTSAR environment before running the commands.
 
 Most scripts preview when the mode is omitted and process with `1`. Modes are script-specific: in particular, **Run 3.5 mode 2 performs the actual SLC crop**, while Run 5/6/6.5/7/9 mode 2 redraws existing products. Use each script's `--help` before changing a workflow.
+
+## Stack checks and optional DHDH selection
+
+Run 0 reads metadata without generating SLCs. Set the starting date explicitly for the stack being checked:
+
+```bash
+python3 run0_nisar_check_stack.py --data "$PWD/data" --start-date 20200101
+
+# Optional: preview product selection, then move other configurations
+python3 run1.5_nisar_select_dhdh.py --data "$PWD/data"
+python3 run1.5_nisar_select_dhdh.py 1 --data "$PWD/data"
+```
+
+Run 1.5 scans the top level of `data/`, keeps DHDH, and moves other configurations and sidecars into `data/not_DHDH/` by default. It preserves existing archive contents and records moves in a journal. Selection does not harmonize spectra or certify sampling compatibility: retain Run 0 and the original Run 2 checks. See [Run 1.5 notes](run1.5_README.md). In the Nepal example, T48D pre-event time series end on **20260816**, while T98A ends on **20260819**; the event date is 20260826.
 
 ## Glacier example
 
@@ -218,7 +243,7 @@ Run 10 reads geographic grid nodes, not independent raw correlation points. Chec
 series="$local_project/pot_timeseries/${tag}_${components}_${filter}_through_20260819"
 
 # Run 11: separate range/azimuth linear-velocity terrain maps;
-# also add a range terrain + point-curve figure from the Run 10 table
+# also add separate range and azimuth terrain + point-curve figures from the Run 10 table
 ./run11_nisar_terrain3d.py 1 \
   --source "$local_project" --dem "$PWD/topo/dem_roi.grd" \
   --run5-tag "$tag" --components-tag "$components" --filter-tag "$filter" \
@@ -236,7 +261,35 @@ series="$local_project/pot_timeseries/${tag}_${components}_${filter}_through_202
   --dem-style earth --spacing-m 20 --columns 4
 ```
 
-The point-table path must match the folder printed by Run 10; it changes with point coordinates and sampling settings. Run 11 can omit `--point-timeseries` when only velocity terrain maps are needed. DEM colouring is an elevation tint with hillshading, not optical imagery. The `20 m` mesh controls rendering density, not measurement resolution.
+The point-table path must match the folder printed by Run 10; it changes with point coordinates and sampling settings. Run 11 can omit `--point-timeseries` when only velocity terrain maps are needed. With `--component both`, this option writes `range_terrain3d_timeseries.png/.pdf` and `azimuth_terrain3d_timeseries.png/.pdf`; each combines that component’s velocity terrain map with its cumulative displacement curves. Use `--component range` or `--component azimuth` to select one direction. DEM colouring is an elevation tint with hillshading, not optical imagery. The `20 m` mesh controls rendering density, not measurement resolution.
+
+## Amplitude changes and the Nepal results bundle
+
+Run 13 starts from the registered SLCs produced by Run 4.5/4.75 and runs independently of POT/time-series inversion. This T98A example generates geographic grids, PNG/PDF and Google Earth KMZ:
+
+```bash
+python3 run13_nisar_amplitude_change.py 1 \
+  --source "$local_project" --pair 20260819 20260831 \
+  --smooth-m 60 --spacing-m 15 \
+  --output "$PWD/amplitude_results/20260819_20260831/cut_geocoded"
+```
+
+For retained T48D DHDH acquisitions, the event pair is **20260816–20260909**. Run 13 saves an initial-filter product and an additional `gaussian_60m` product. Amplitude is the square root of filtered power; dB change is `10 log10(P_post/P_pre)`. Values are relative, without sigma0/gamma0 calibration or terrain radiometric normalization. The 15 m geographic sampling and 60 m filter parameter have different meanings. See [Run 13 details](run13_README.md).
+
+The collector is configured for the documented Nepal server layout: `NISAR/T98A`, `NISAR/T48D`, `lutan/ASC` and `lutan/DESC`, including the date pairs and tags used here. Adapt paths and selections for another project. It collects final products, available scripts and DEMs. Preview does not copy data; identical existing files are skipped and conflicting data files stop the copy. Source processing directories are retained.
+
+```bash
+base="/data2/xinw/landsides/nepal_landsides"
+bundle="$base/Nepal_20260826_SAR_Results"
+python3 collect_nepal_sar_results.py --base "$base"
+python3 collect_nepal_sar_results.py 1 --base "$base"
+
+python3 plot_nepal_amplitude_4x3.py 1 --bundle "$bundle" \
+  --region 85.512 85.536 28.278 28.299 \
+  --nisar-level initial --change-limit-db 10 --dpi 300
+```
+
+Figure rows: **LuTan descending, NISAR T98A ascending, LuTan ascending, NISAR T48D descending**. Columns show pre-event relative power, post-event relative power, and dB change. Pre/post images share one scale within each row; each change panel has its own colourbar with the same ±10 dB range. `--region` changes the displayed extent only; source GRDs remain unchanged. NISAR defaults to the existing `initial` product; `--nisar-level gaussian_60m` selects the stored extra-filtered version. Outputs are under `02_Amplitude/Comparison_4x3/`. See [comparison plotting notes](plot_nepal_amplitude_4x3_README.md).
 
 ## Main products and interpretation
 
@@ -249,6 +302,8 @@ The point-table path must match the folder printed by Run 10; it changes with po
 | `pot_timeseries/PRODUCT/point_timeseries/` | Run 10 curves, values and location checks |
 | `pot_timeseries/PRODUCT/terrain3d/` | Run 11 velocity terrain figures |
 | `pot_timeseries/PRODUCT/terrain3d_dates/{range,azimuth}/` | Run 12 date maps and galleries |
+| `amplitude_results/PRE_POST/` | Run 13 amplitude and power change products |
+| `Nepal_20260826_SAR_Results/` | Collected products, scripts and source/checksum manifest |
 
 Range and azimuth are processed separately. Run 9 accumulates adjacent-pair offsets with the first scene fixed to zero; a missing increment propagates to later cumulative values at that node. This adjacent chain has no redundant temporal-network constraints or atmospheric correction. Its linear velocity map describes the average trend, not acceleration. Radar offset components are not a recovered 3D glacier velocity vector; the 3D figures use DEM elevation for surface height.
 
